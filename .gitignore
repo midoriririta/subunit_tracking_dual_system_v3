@@ -17,14 +17,7 @@ venv/
 # Keep bundled raw CSVs and generated cache files trackable for deployment.
 # Large one-off local rebuild artefacts can be ignored manually if needed.
 subunit_tracking_clean/
-# Python
-*.py[cod]
-.ipynb_checkpoints/
-# Streamlit secrets
-# Logs
-# OS/editor
-.vscode/
-.idea/
-# Local generated outputs
-data/cache/
-data/outputs/
+
+# Bundled deployment data
+# Keep initial raw staff CSVs, generated cache files, and generated output CSVs
+# in the repo so Streamlit can open immediately without a first-run scrape.
