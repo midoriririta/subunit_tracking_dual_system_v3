@@ -18,6 +18,9 @@ venv/
 # Large one-off local rebuild artefacts can be ignored manually if needed.
 subunit_tracking_clean/
 
-# Bundled deployment data
-# Keep initial raw staff CSVs, generated cache files, and generated output CSVs
-# in the repo so Streamlit can open immediately without a first-run scrape.
+# Keep generated cache/output files trackable for deployment.
+# Do not ignore data/cache/ or data/outputs/ because the app should open from the real OpenAlex cache.
+
+# Large generated output CSVs exceed GitHub's 100 MB file limit.
+# They can be regenerated from the OpenAlex parquet cache.
+data/outputs/scraped_publications_ndph.csv
