@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+
+# Streamlit / logs
+.streamlit/secrets.toml
+*.log
+
+# Keep bundled raw CSVs and generated cache files trackable for deployment.
+# Large one-off local rebuild artefacts can be ignored manually if needed.
+subunit_tracking_clean/
+# Python
+*.py[cod]
+.ipynb_checkpoints/
+# Streamlit secrets
+# Logs
+# OS/editor
+.vscode/
+.idea/
+# Local generated outputs
+data/cache/
+data/outputs/
