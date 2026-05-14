@@ -16,6 +16,7 @@ from src.openalex_dashboard.config import (
     DEFAULT_OPENALEX_MAILTO,
     OUTPUT_DIR,
     RAW_DIR,
+    get_dataset_display_order,
 )
 from src.openalex_dashboard.data import cache_status, clear_streamlit_cache, load_bundle
 from src.openalex_dashboard.filters import apply_global_filters, render_sidebar_filters
@@ -25,23 +26,18 @@ from src.openalex_dashboard.views.domains_sources import render_domains_sources_
 from src.openalex_dashboard.views.explorer import render_explorer_tab
 from src.openalex_dashboard.views.overview import render_overview_tab
 
-st.set_page_config(page_title=BASE_PAGE_TITLE, page_icon="", layout="wide")
-
+st.set_page_config(page_title=BASE_PAGE_TITLE, page_icon="📚", layout="wide")
 
 BAD_SNAPSHOT_MARKER = "staff_recent_publications_json"
 
 
 def sync_browser_title(title: str) -> None:
-    safe_title = title.replace("'", "\\'")
+    """Keep the browser tab title aligned with the selected organisational view."""
+    safe_title = title.replace("\\", "\\\\").replace("'", "\\'")
     components.html(
         f"""
         <script>
-        const newTitle = '{safe_title}';
-        if (window.parent && window.parent.document) {{
-            window.parent.document.title = newTitle;
-        }} else {{
-            document.title = newTitle;
-        }}
+        window.parent.document.title = '{safe_title}';
         </script>
         """,
         height=0,
@@ -50,6 +46,7 @@ def sync_browser_title(title: str) -> None:
 
 
 def read_selected_dataset() -> str:
+    """Read the selected dataset from the URL query parameter."""
     params = st.query_params
     dataset_key = params.get("dataset", DEFAULT_DATASET_KEY)
     if isinstance(dataset_key, list):
@@ -69,6 +66,63 @@ def _display_path(path: Path) -> str:
         return str(path.relative_to(Path.cwd()))
     except Exception:
         return str(path)
+
+
+def _dataset_nav_label(dataset_key: str) -> str:
+    cfg = DATASET_CONFIGS[dataset_key]
+    return cfg.get("navigation_label") or cfg.get("label", dataset_key)
+
+
+def render_dataset_selector(current_dataset_key: str) -> str:
+    """Render a hierarchy-aware dataset switcher.
+
+    The Demographic Science Unit is intentionally shown as a subunit of the
+    Nuffield Department of Population Health rather than as a parallel
+    department-level choice.
+    """
+    dataset_options = get_dataset_display_order()
+    if current_dataset_key not in dataset_options:
+        current_dataset_key = DEFAULT_DATASET_KEY
+
+    switch_col, _ = st.columns([1.25, 4], gap="small")
+    with switch_col:
+        selected_dataset_key = st.radio(
+            "Organisation view",
+            options=dataset_options,
+            index=dataset_options.index(current_dataset_key),
+            format_func=_dataset_nav_label,
+            horizontal=False,
+            label_visibility="visible",
+        )
+        st.caption("The Demographic Science Unit is shown as a subunit of NDPH.")
+
+    if selected_dataset_key != current_dataset_key:
+        st.query_params["dataset"] = selected_dataset_key
+        st.rerun()
+
+    return selected_dataset_key
+
+
+def render_dataset_header(selected_cfg: dict) -> None:
+    parent_label = selected_cfg.get("parent_label")
+    if parent_label:
+        st.markdown(
+            f"""
+            <div style="line-height:1.25; margin-top:0.3rem; margin-bottom:0.2rem;">
+              <div style="font-size:0.95rem; color:rgba(49,51,63,0.72); font-weight:600;">
+                {parent_label}
+              </div>
+              <div style="font-size:1.45rem; font-weight:750; padding-left:1.35rem;">
+                ↳ {selected_cfg['label']}
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.title(selected_cfg["title"])
+    else:
+        st.title(selected_cfg["title"])
+    st.caption(selected_cfg["caption"])
 
 
 def cache_looks_like_snapshot_cache(dataset_key: str) -> bool:
@@ -135,7 +189,11 @@ def ensure_initial_full_cache(dataset_key: str) -> None:
         f"The {status['dataset']['label']} publication cache needs a full OpenAlex build ({reason}). "
         "This happens only when the cache is missing or was built from the old staff-profile snapshot."
     )
-    with st.spinner(f"Building full OpenAlex cache for {status['dataset']['label']} from `{_display_path(default_staff_csv)}`..."):
+
+    with st.spinner(
+        f"Building full OpenAlex cache for {status['dataset']['label']} from "
+        f"`{_display_path(default_staff_csv)}`..."
+    ):
         try:
             result = build_full_openalex_cache(
                 dataset_key=dataset_key,
@@ -188,7 +246,10 @@ def render_cache_update_panel(dataset_key: str) -> None:
             uploaded = st.file_uploader(
                 "Upload replacement staff CSV",
                 type=["csv"],
-                help="Upload a staff/person CSV. The app will rebuild the full OpenAlex publication cache only after you click the button below.",
+                help=(
+                    "Upload a staff/person CSV. The app will rebuild the full OpenAlex "
+                    "publication cache only after you click the button below."
+                ),
             )
             mailto = st.text_input(
                 "OpenAlex mailto",
@@ -209,127 +270,118 @@ def render_cache_update_panel(dataset_key: str) -> None:
                 value=0.55,
                 step=0.05,
             )
+
             refresh_clicked = st.button("Update cache from uploaded CSV", use_container_width=True)
             rebuild_bundled_clicked = st.button("Rebuild cache from bundled raw CSV", use_container_width=True)
 
-    if refresh_clicked:
-        if uploaded is None:
-            st.error("Please upload a new staff CSV before updating the cache.")
-            st.stop()
-        RAW_DIR.mkdir(parents=True, exist_ok=True)
-        uploaded_path = RAW_DIR / f"{dataset_key}_uploaded_staff.csv"
-        uploaded_path.write_bytes(uploaded.getvalue())
-        with st.spinner("Rebuilding full OpenAlex cache from the uploaded staff CSV..."):
-            try:
-                result = build_full_openalex_cache(
-                    dataset_key=dataset_key,
-                    input_csv=uploaded_path,
-                    mailto=mailto,
-                    max_candidates=int(max_candidates),
-                    min_author_score=float(min_author_score),
-                )
-            except Exception as exc:
-                st.error(f"OpenAlex cache update failed: {exc}")
-                if st.session_state.get("build_log"):
-                    with st.expander("Build log", expanded=True):
-                        st.code("\n".join(st.session_state["build_log"][-120:]))
-                st.stop()
-        clear_streamlit_cache()
-        st.success("Updated the publication CSV and parquet cache from the full OpenAlex refresh.")
-        paths = result.get("paths", {})
-        if paths.get("scraped_publications_csv"):
-            st.info(f"Publication CSV written to `{paths['scraped_publications_csv']}`")
-        st.rerun()
+            if refresh_clicked:
+                if uploaded is None:
+                    st.error("Please upload a new staff CSV before updating the cache.")
+                    st.stop()
+                RAW_DIR.mkdir(parents=True, exist_ok=True)
+                uploaded_path = RAW_DIR / f"{dataset_key}_uploaded_staff.csv"
+                uploaded_path.write_bytes(uploaded.getvalue())
 
-    if rebuild_bundled_clicked:
-        if not default_staff_csv:
-            st.error("No bundled raw staff CSV is available for this dataset.")
-            st.stop()
-        with st.spinner("Rebuilding full OpenAlex cache from the bundled raw CSV..."):
-            try:
-                result = build_full_openalex_cache(
-                    dataset_key=dataset_key,
-                    input_csv=default_staff_csv,
-                    mailto=mailto,
-                    max_candidates=int(max_candidates),
-                    min_author_score=float(min_author_score),
-                )
-            except Exception as exc:
-                st.error(f"OpenAlex cache rebuild failed: {exc}")
-                if st.session_state.get("build_log"):
-                    with st.expander("Build log", expanded=True):
-                        st.code("\n".join(st.session_state["build_log"][-120:]))
-                st.stop()
-        clear_streamlit_cache()
-        st.success("Rebuilt the full OpenAlex publication cache from the bundled raw CSV.")
-        paths = result.get("paths", {})
-        if paths.get("scraped_publications_csv"):
-            st.info(f"Publication CSV written to `{paths['scraped_publications_csv']}`")
-        st.rerun()
+                with st.spinner("Rebuilding full OpenAlex cache from the uploaded staff CSV..."):
+                    try:
+                        result = build_full_openalex_cache(
+                            dataset_key=dataset_key,
+                            input_csv=uploaded_path,
+                            mailto=mailto,
+                            max_candidates=int(max_candidates),
+                            min_author_score=float(min_author_score),
+                        )
+                    except Exception as exc:
+                        st.error(f"OpenAlex cache update failed: {exc}")
+                        if st.session_state.get("build_log"):
+                            with st.expander("Build log", expanded=True):
+                                st.code("\n".join(st.session_state["build_log"][-120:]))
+                        st.stop()
+
+                clear_streamlit_cache()
+                st.success("Updated the publication CSV and parquet cache from the full OpenAlex refresh.")
+                paths = result.get("paths", {})
+                if paths.get("scraped_publications_csv"):
+                    st.info(f"Publication CSV written to `{paths['scraped_publications_csv']}`")
+                st.rerun()
+
+            if rebuild_bundled_clicked:
+                if not default_staff_csv:
+                    st.error("No bundled raw staff CSV is available for this dataset.")
+                    st.stop()
+
+                with st.spinner("Rebuilding full OpenAlex cache from the bundled raw CSV..."):
+                    try:
+                        result = build_full_openalex_cache(
+                            dataset_key=dataset_key,
+                            input_csv=default_staff_csv,
+                            mailto=mailto,
+                            max_candidates=int(max_candidates),
+                            min_author_score=float(min_author_score),
+                        )
+                    except Exception as exc:
+                        st.error(f"OpenAlex cache rebuild failed: {exc}")
+                        if st.session_state.get("build_log"):
+                            with st.expander("Build log", expanded=True):
+                                st.code("\n".join(st.session_state["build_log"][-120:]))
+                        st.stop()
+
+                clear_streamlit_cache()
+                st.success("Rebuilt the full OpenAlex publication cache from the bundled raw CSV.")
+                paths = result.get("paths", {})
+                if paths.get("scraped_publications_csv"):
+                    st.info(f"Publication CSV written to `{paths['scraped_publications_csv']}`")
+                st.rerun()
 
 
-current_dataset_key = read_selected_dataset()
-current_cfg = DATASET_CONFIGS[current_dataset_key]
+def main() -> None:
+    current_dataset_key = read_selected_dataset()
+    selected_dataset_key = render_dataset_selector(current_dataset_key)
+    selected_cfg = DATASET_CONFIGS[selected_dataset_key]
 
-switch_col, _ = st.columns([1.1, 4], gap="small")
-with switch_col:
-    selected_label = st.radio(
-        "Department",
-        options=[cfg["label"] for cfg in DATASET_CONFIGS.values()],
-        index=list(DATASET_CONFIGS.keys()).index(current_dataset_key),
-        horizontal=False,
-    )
+    sync_browser_title(selected_cfg["title"])
+    render_dataset_header(selected_cfg)
 
-selected_dataset_key = next(key for key, cfg in DATASET_CONFIGS.items() if cfg["label"] == selected_label)
-if selected_dataset_key != current_dataset_key:
-    st.query_params["dataset"] = selected_dataset_key
-    st.rerun()
+    # First-launch / repaired-deployment behaviour:
+    # use a real cache if present; otherwise build the full OpenAlex cache from data/raw.
+    ensure_initial_full_cache(selected_dataset_key)
 
-selected_cfg = DATASET_CONFIGS[selected_dataset_key]
-sync_browser_title(selected_cfg["title"])
-st.title(f" {selected_cfg['title']}")
-st.caption(selected_cfg["caption"])
+    try:
+        bundle = load_bundle(selected_dataset_key)
+    except FileNotFoundError as exc:
+        st.error(str(exc))
+        st.info(
+            "No full cache could be loaded or created. Check that the matching CSV exists in data/raw, "
+            "or upload a staff CSV at the end of the sidebar to rebuild the cache."
+        )
+        render_cache_update_panel(selected_dataset_key)
+        st.stop()
 
-# First-launch / repaired-deployment behaviour:
-# use a real cache if present; otherwise build the full OpenAlex cache from data/raw.
-ensure_initial_full_cache(selected_dataset_key)
-
-try:
-    bundle = load_bundle(selected_dataset_key)
-except FileNotFoundError as exc:
-    st.error(str(exc))
-    st.info(
-        "No full cache could be loaded or created. Check that the matching CSV exists in data/raw, "
-        "or upload a staff CSV at the end of the sidebar to rebuild the cache."
-    )
+    filters = render_sidebar_filters(bundle)
     render_cache_update_panel(selected_dataset_key)
-    st.stop()
+    filtered = apply_global_filters(bundle, filters)
 
-filters = render_sidebar_filters(bundle)
-render_cache_update_panel(selected_dataset_key)
-filtered = apply_global_filters(bundle, filters)
+    tab_overview, tab_domains, tab_collab, tab_explorer, tab_quality = st.tabs(
+        [
+            "Overview",
+            "Domains & Sources",
+            "Collaborators",
+            "Publications Explorer",
+            "Data Quality",
+        ]
+    )
 
-(
-    tab_overview,
-    tab_domains,
-    tab_collab,
-    tab_explorer,
-    tab_quality,
-) = st.tabs([
-    "Overview",
-    "Domains & Sources",
-    "Collaborators",
-    "Publications Explorer",
-    "Data Quality",
-])
+    with tab_overview:
+        render_overview_tab(bundle, filtered)
+    with tab_domains:
+        render_domains_sources_tab(bundle, filtered)
+    with tab_collab:
+        render_collaborators_tab(bundle, filtered)
+    with tab_explorer:
+        render_explorer_tab(bundle, filtered)
+    with tab_quality:
+        render_data_quality_tab(bundle, filtered)
 
-with tab_overview:
-    render_overview_tab(bundle, filtered)
-with tab_domains:
-    render_domains_sources_tab(bundle, filtered)
-with tab_collab:
-    render_collaborators_tab(bundle, filtered)
-with tab_explorer:
-    render_explorer_tab(bundle, filtered)
-with tab_quality:
-    render_data_quality_tab(bundle, filtered)
+
+if __name__ == "__main__":
+    main()
