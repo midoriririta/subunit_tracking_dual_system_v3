@@ -76,9 +76,8 @@ def _dataset_nav_label(dataset_key: str) -> str:
 def render_dataset_selector(current_dataset_key: str) -> str:
     """Render a hierarchy-aware dataset switcher.
 
-    The Demographic Science Unit is intentionally shown as a subunit of the
-    Nuffield Department of Population Health rather than as a parallel
-    department-level choice.
+    The Demographic Science Unit is shown under NDPH in the selector only.
+    The main page header remains a single, non-repeated dashboard title.
     """
     dataset_options = get_dataset_display_order()
     if current_dataset_key not in dataset_options:
@@ -94,7 +93,6 @@ def render_dataset_selector(current_dataset_key: str) -> str:
             horizontal=False,
             label_visibility="visible",
         )
-        #st.caption("The Demographic Science Unit is shown as a subunit of NDPH.")
 
     if selected_dataset_key != current_dataset_key:
         st.query_params["dataset"] = selected_dataset_key
@@ -104,24 +102,12 @@ def render_dataset_selector(current_dataset_key: str) -> str:
 
 
 def render_dataset_header(selected_cfg: dict) -> None:
-    parent_label = selected_cfg.get("parent_label")
-    if parent_label:
-        st.markdown(
-            f"""
-            <div style="line-height:1.25; margin-top:0.3rem; margin-bottom:0.2rem;">
-              <div style="font-size:0.95rem; color:rgba(49,51,63,0.72); font-weight:600;">
-                {parent_label}
-              </div>
-              <div style="font-size:1.45rem; font-weight:750; padding-left:1.35rem;">
-                ↳ {selected_cfg['label']}
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.title(selected_cfg["title"])
-    else:
-        st.title(selected_cfg["title"])
+    """Render one clean page header for the selected organisation.
+
+    Do not repeat the NDPH -> Demographic Science Unit hierarchy here, because
+    the same hierarchy is already visible in the Organisation view selector.
+    """
+    st.title(selected_cfg["title"])
     st.caption(selected_cfg["caption"])
 
 
