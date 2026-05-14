@@ -94,7 +94,7 @@ def render_dataset_selector(current_dataset_key: str) -> str:
             horizontal=False,
             label_visibility="visible",
         )
-        st.caption("The Demographic Science Unit is shown as a subunit of NDPH.")
+        #st.caption("The Demographic Science Unit is shown as a subunit of NDPH.")
 
     if selected_dataset_key != current_dataset_key:
         st.query_params["dataset"] = selected_dataset_key
