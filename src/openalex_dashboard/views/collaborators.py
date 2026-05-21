@@ -306,19 +306,27 @@ def _build_collaboration_edges(
     return nodes, edges
 
 
+def _internal_roster_authorships(authorships: pd.DataFrame) -> pd.DataFrame:
+    required = {"work_id", "is_roster_person"}
+    if authorships.empty or not required.issubset(authorships.columns):
+        return pd.DataFrame()
+
+    roster = authorships[authorships["is_roster_person"].fillna(False)].copy()
+    if roster.empty:
+        return pd.DataFrame()
+
+    roster = _add_node_id(roster, prefer_roster_name=True)
+    if roster.empty:
+        return pd.DataFrame()
+
+    return roster.drop_duplicates(["work_id", "node_id"])
+
+
 def _build_internal_collaboration_edges(
     authorships: pd.DataFrame,
     max_edges: int = 60,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    required = {"work_id", "is_roster_person"}
-    if authorships.empty or not required.issubset(authorships.columns):
-        return pd.DataFrame(), pd.DataFrame()
-
-    roster = authorships[authorships["is_roster_person"].fillna(False)].copy()
-    if roster.empty:
-        return pd.DataFrame(), pd.DataFrame()
-
-    roster = _add_node_id(roster, prefer_roster_name=True)
+    roster = _internal_roster_authorships(authorships)
     if roster.empty:
         return pd.DataFrame(), pd.DataFrame()
 
@@ -347,6 +355,50 @@ def _build_internal_collaboration_edges(
     nodes = nodes.merge(_node_totals(graph_edges), on="node", how="left")
     nodes["total_shared_works"] = nodes["total_shared_works"].fillna(0)
     return nodes, edges
+
+
+def _build_internal_collaborator_ranking(authorships: pd.DataFrame) -> pd.DataFrame:
+    roster = _internal_roster_authorships(authorships)
+    if roster.empty:
+        return pd.DataFrame()
+
+    collaborative_work_ids = set(
+        roster.groupby("work_id")["node_id"].nunique().loc[lambda s: s >= 2].index
+    )
+    if not collaborative_work_ids:
+        return pd.DataFrame()
+
+    collaborative_roster = roster[roster["work_id"].isin(collaborative_work_ids)].copy()
+
+    person_rows = []
+    for person, group in collaborative_roster.groupby("node_id"):
+        person_work_ids = set(group["work_id"])
+        collaborators: set[str] = set()
+
+        for work_id in person_work_ids:
+            staff_on_work = set(
+                collaborative_roster.loc[collaborative_roster["work_id"] == work_id, "node_id"]
+                .dropna()
+                .astype(str)
+            )
+            collaborators.update(staff_on_work - {person})
+
+        person_rows.append(
+            {
+                "internal_staff_member": person,
+                "internal_collaborative_works": len(person_work_ids),
+                "unique_internal_collaborators": len(collaborators),
+            }
+        )
+
+    ranking = pd.DataFrame(person_rows)
+    if ranking.empty:
+        return ranking
+
+    return ranking.sort_values(
+        ["internal_collaborative_works", "unique_internal_collaborators", "internal_staff_member"],
+        ascending=[False, False, True],
+    )
 
 
 def _layout_network(nodes: pd.DataFrame, edges: pd.DataFrame, seed: int = 7) -> dict[str, tuple[float, float]]:
@@ -456,9 +508,6 @@ def _render_network(authorships: pd.DataFrame) -> None:
         height=650,
         seed=7,
     )
-    st.caption(
-        "Edges represent shared works in the currently filtered publication set; node size increases with repeated collaboration."
-    )
 
 
 def _render_internal_network(authorships: pd.DataFrame) -> None:
@@ -482,28 +531,47 @@ def _render_internal_network(authorships: pd.DataFrame) -> None:
         height=620,
         seed=11,
     )
-    st.caption(
-        "This section only counts collaborations where both authors are roster/internal staff in the selected dataset and current filters."
+
+    table_view = st.selectbox(
+        "Internal collaboration ranking",
+        options=["Top internal collaborator pairs", "Top internal collaborators"],
+        index=0,
     )
 
-    st.markdown("**Top internal collaborator pairs**")
-    top_pairs = edges.head(30).rename(
-        columns={
-            "source": "staff_member_1",
-            "target": "staff_member_2",
-            "shared_works": "collaboration_count",
-        }
-    )
-    st.dataframe(
-        top_pairs,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "staff_member_1": "Internal staff member 1",
-            "staff_member_2": "Internal staff member 2",
-            "collaboration_count": "Shared works",
-        },
-    )
+    if table_view == "Top internal collaborator pairs":
+        top_pairs = edges.head(30).rename(
+            columns={
+                "source": "staff_member_1",
+                "target": "staff_member_2",
+                "shared_works": "collaboration_count",
+            }
+        )
+        st.dataframe(
+            top_pairs,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "staff_member_1": "Internal staff member 1",
+                "staff_member_2": "Internal staff member 2",
+                "collaboration_count": "Shared works",
+            },
+        )
+    else:
+        ranking = _build_internal_collaborator_ranking(authorships)
+        if ranking.empty:
+            st.info("No person-level internal collaboration ranking can be drawn for the current filters.")
+            return
+
+        st.dataframe(
+            ranking.head(30),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "internal_staff_member": "Internal staff member",
+                "internal_collaborative_works": "Internal collaborative works",
+                "unique_internal_collaborators": "Unique internal collaborators",
+            },
+        )
 
 
 def render_collaborators_tab(bundle: Dict[str, Any], filtered: Dict[str, Any]) -> None:
