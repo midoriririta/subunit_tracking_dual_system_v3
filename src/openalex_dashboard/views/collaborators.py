@@ -386,7 +386,6 @@ def _build_internal_collaborator_ranking(authorships: pd.DataFrame) -> pd.DataFr
         person_rows.append(
             {
                 "internal_staff_member": person,
-                "internal_collaborative_works": len(person_work_ids),
                 "unique_internal_collaborators": len(collaborators),
             }
         )
@@ -396,8 +395,8 @@ def _build_internal_collaborator_ranking(authorships: pd.DataFrame) -> pd.DataFr
         return ranking
 
     return ranking.sort_values(
-        ["internal_collaborative_works", "unique_internal_collaborators", "internal_staff_member"],
-        ascending=[False, False, True],
+        ["unique_internal_collaborators", "internal_staff_member"],
+        ascending=[False, True],
     )
 
 
@@ -568,7 +567,6 @@ def _render_internal_network(authorships: pd.DataFrame) -> None:
             hide_index=True,
             column_config={
                 "internal_staff_member": "Internal staff member",
-                "internal_collaborative_works": "Internal collaborative works",
                 "unique_internal_collaborators": "Unique internal collaborators",
             },
         )
