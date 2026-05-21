@@ -469,11 +469,6 @@ def _render_internal_network(authorships: pd.DataFrame) -> None:
         st.info("No internal staff-to-staff collaboration network can be drawn for the current filters.")
         return
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Internal staff in network", format_int(nodes["node"].nunique()))
-    c2.metric("Internal collaborator pairs", format_int(len(edges)))
-    c3.metric("Pairwise shared works", format_int(edges["shared_works"].sum()))
-
     graph_edges = edges.head(60).copy()
     graph_nodes = pd.DataFrame({"node": sorted(set(graph_edges["source"]).union(graph_edges["target"]))})
     graph_nodes["kind"] = "Internal staff"
